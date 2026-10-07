@@ -5,11 +5,16 @@
 # B_MAX_ONGOING is the admission value chosen from B1/B2; defaults to 16.
 set -euo pipefail
 
-COURSE_DIR="${COURSE_DIR:?set COURSE_DIR to the course workload directory}"
+COURSE_DIR="${COURSE_DIR:-$(cd -- "$(dirname -- "$0")" && pwd)/course_workload}"
 RESULTS_ROOT="${RESULTS_ROOT:-results/target3}"
 WORKLOAD_FILE="$COURSE_DIR/mooncake_prefix_workload_v2_seed2026.jsonl"
 RAY_PY="${RAY_PY:-/root/autodl-tmp/envs/rayenv/bin/python}"
 B_MAX_ONGOING="${B_MAX_ONGOING:-16}"
+
+if [[ ! -f "$COURSE_DIR/validate_workload.py" ]]; then
+  echo "ERROR: validate_workload.py not found in COURSE_DIR: $COURSE_DIR" >&2
+  exit 1
+fi
 
 "$RAY_PY" "$COURSE_DIR/validate_workload.py" "$WORKLOAD_FILE"
 ./launch_backends.sh
