@@ -142,7 +142,7 @@ python src/target3/analyze.py \
 | `results/target3/B_candidates/candidate-1/run-1/` | B 候选 1（p2c，max_ongoing=16） |
 | `results/target3/B_candidates/candidate-2/run-1/` | B 候选 2（p2c，max_ongoing=64） |
 | `results/target3/C_affinity/run-1/` | C（consistent_hash，max_ongoing=64） |
-| `results/target3/D_improved/run-1/` | D（affinity_load_aware，max_ongoing=64，附 `router_fallbacks.jsonl`）。该文件记录路由决策次数，不是唯一回退请求数；同一请求可能被多次决策。本轮共 47,664 条决策记录，覆盖 64 个前缀族，时间跨度约 89 秒（2026-10-05 07:40:16–07:41:45 UTC）。 |
+| `results/target3/D_improved/run-1/` | D（affinity_load_aware，max_ongoing=64，附 `router_fallbacks.jsonl`）。该文件只记录回退事件：所选副本与亲和首选副本不同时写入一行（`primary_replica`、`chosen_replica` 等字段），并非全部路由决策日志；文件没有请求 ID，不能据行数推算唯一回退请求数。本轮共 47,664 条回退记录，涉及 64 个 `session_id`，时间跨度约 89 秒（2026-10-05 07:40:16–07:41:45 UTC）。 |
 | `results/target1/shared_prefix/run-1/` | target1 共享前缀组（32 条 + 1 条预热） |
 | `results/target1/dispersed_prefix/run-1/` | target1 分散前缀组（32 条） |
 | `results/target3_main_table.md` | `analyze.py` 生成的报告主表原文 |
