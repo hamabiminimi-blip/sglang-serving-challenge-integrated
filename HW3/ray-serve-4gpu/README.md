@@ -23,7 +23,7 @@
   - `ray[serve]==2.56.0`，`protobuf==6.33.5`（7.x 与 Ray 2.56 不兼容，见文末排错记录），`httpx`，`aiohttp`
 - 模型：`Qwen/Qwen3-0.6B`，本地路径 `/root/autodl-tmp/models/Qwen3-0.6B`（hf-mirror 下载）
 - 两个环境互相独立，只通过 HTTP 通信；SGLang 后端监听 31000–31003，Ray Serve 代理监听 8000
-- 归档运行未显式设置 `--mem-fraction-static` 与 `--attention-backend`，使用 SGLang 0.5.14 默认行为；当时有效的具体默认值未单独记录
+- 归档结果产生时未显式设置 `--mem-fraction-static` 与 `--attention-backend`，使用当时 SGLang 0.5.14 默认行为，具体值未单独记录；脚本当前默认值为 `0.85` / `triton`，后续运行会显式传入并写入 `config.json`。当前默认值不代表归档运行时使用了这些参数。
 
 ## 安装方法
 

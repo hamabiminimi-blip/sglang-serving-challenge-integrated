@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Start four SGLang backends, one per GPU, ports 31000-31003.
 # Radix cache stays ON (default). Logs go to logs/backend-<i>.log.
-# 如需在 4 卡上复跑并记录显存比例，请在此显式传参。
+# Startup parameters can be overridden with MEM_FRACTION_STATIC and ATTENTION_BACKEND.
 set -euo pipefail
 MODEL="${MODEL:-/root/autodl-tmp/models/Qwen3-0.6B}"
 LOGDIR="${LOGDIR:-logs}"
 SGL_PY="${SGL_PY:-/root/autodl-tmp/envs/sgl/bin/python}"
+MEM_FRACTION_STATIC="${MEM_FRACTION_STATIC:-0.85}"
+ATTENTION_BACKEND="${ATTENTION_BACKEND:-triton}"
 STARTED_PIDS=()
 
 fail_startup() {
@@ -20,6 +22,7 @@ fail_startup() {
 # SGLang compiles CUDA kernels at startup; ninja lives next to the interpreter.
 export PATH="$(dirname "$SGL_PY"):$PATH"
 mkdir -p "$LOGDIR"
+echo "SGLang startup parameters: --mem-fraction-static=$MEM_FRACTION_STATIC --attention-backend=$ATTENTION_BACKEND"
 for i in 0 1 2 3; do
   port=$((31000 + i))
   if curl -s "http://127.0.0.1:${port}/get_server_info" >/dev/null 2>&1; then
@@ -30,6 +33,8 @@ for i in 0 1 2 3; do
     --model "$MODEL" \
     --host 127.0.0.1 \
     --port "$port" \
+    --mem-fraction-static "$MEM_FRACTION_STATIC" \
+    --attention-backend "$ATTENTION_BACKEND" \
     > "$LOGDIR/backend-${i}.log" 2>&1 &
   pid=$!
   STARTED_PIDS+=("$pid")

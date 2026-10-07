@@ -13,6 +13,8 @@ COURSE_DIR="${COURSE_DIR:?set COURSE_DIR to the course workload directory (26fal
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 WORKLOAD="${WORKLOAD:-$COURSE_DIR/mooncake_prefix_workload_v2_seed2026.jsonl}"
 RAY_PY="${RAY_PY:-/root/autodl-tmp/envs/rayenv/bin/python}"
+MEM_FRACTION_STATIC="${MEM_FRACTION_STATIC:-0.85}"
+ATTENTION_BACKEND="${ATTENTION_BACKEND:-triton}"
 RAY_BIN="$(dirname "$RAY_PY")"
 export PATH="$RAY_BIN:$PATH"
 
@@ -86,6 +88,8 @@ echo "Serve app deployed (pid $DEPLOY_PID)"
   --base-url "$BASE_URL" \
   --workload "$WORKLOAD" \
   --max-in-flight 2048 \
+  --metadata "mem_fraction_static=$MEM_FRACTION_STATIC" \
+  --metadata "attention_backend=$ATTENTION_BACKEND" \
   --output-dir "$RESULTS_DIR" \
   "$@"
 
