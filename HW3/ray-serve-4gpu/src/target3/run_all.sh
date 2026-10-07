@@ -6,7 +6,7 @@
 set -euo pipefail
 
 COURSE_DIR="${COURSE_DIR:-$(cd -- "$(dirname -- "$0")" && pwd)/course_workload}"
-RESULTS_ROOT="${RESULTS_ROOT:-results/target3}"
+RESULTS_ROOT="${RESULTS_ROOT:-$(cd -- "$(dirname -- "$0")/../.." && pwd)/results/target3}"
 WORKLOAD_FILE="$COURSE_DIR/mooncake_prefix_workload_v2_seed2026.jsonl"
 RAY_PY="${RAY_PY:-/root/autodl-tmp/envs/rayenv/bin/python}"
 B_MAX_ONGOING="${B_MAX_ONGOING:-16}"
