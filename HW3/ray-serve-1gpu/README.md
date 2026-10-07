@@ -51,6 +51,7 @@ bash stop_all.sh   # 全部做完后停止 SGLang + Ray
 ```
 
 - `B_PICK=64`：B 组两个候选中 64 同时具备更高吞吐与更低延迟（见 4.1 主表）。
+- 此 64 是单卡环境自身 B1/B2 对照所得；四卡版的候选值 16/32 来自独立的四卡对照。单卡 KV 池较小、批处理收益点不同，两套候选值不可互相套用。
 - `TIMEOUT_S=900`：官方压测端默认单请求 300s；单卡 4 后端容量 < 到达率
   （≈69 req/s），组 A/C 的队列排空需 360~450s，300s 会人为截断
   （组 A 曾 130 条 `TimeoutError`）。B/D 的最大延迟远低于 300s，放宽超时不改变
@@ -141,7 +142,7 @@ python src/target3/analyze.py \
 | `results/target3/B_candidates/candidate-1/run-1/` | B 候选 1（p2c，max_ongoing=16） |
 | `results/target3/B_candidates/candidate-2/run-1/` | B 候选 2（p2c，max_ongoing=64） |
 | `results/target3/C_affinity/run-1/` | C（consistent_hash，max_ongoing=64） |
-| `results/target3/D_improved/run-1/` | D（affinity_load_aware，max_ongoing=64，附 `router_fallbacks.jsonl`，仅含本轮数据） |
+| `results/target3/D_improved/run-1/` | D（affinity_load_aware，max_ongoing=64，附 `router_fallbacks.jsonl`）。该文件记录路由决策次数，不是唯一回退请求数；同一请求可能被多次决策。本轮共 47,664 条决策记录，覆盖 64 个前缀族，时间跨度约 89 秒（2026-10-05 07:40:16–07:41:45 UTC）。 |
 | `results/target1/shared_prefix/run-1/` | target1 共享前缀组（32 条 + 1 条预热） |
 | `results/target1/dispersed_prefix/run-1/` | target1 分散前缀组（32 条） |
 | `results/target3_main_table.md` | `analyze.py` 生成的报告主表原文 |

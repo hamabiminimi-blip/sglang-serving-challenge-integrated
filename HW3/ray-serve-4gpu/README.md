@@ -4,6 +4,16 @@
 `Client -> Ray Serve HTTP Proxy(:8000) -> Replica 0..3（各在独立 worker 逻辑节点）-> SGLang 0..3（GPU 0..3）`。
 目标一（前缀缓存测量）的脚本与结果在 `src/target1/` 与 `results/target1/`。
 
+> **与 `report.pdf` 的差异说明**：`report.pdf` 导出之后，组 D 路由器的负载取值口径做过一次修正——
+> `src/target3/routers.py` 的 `_load()` 由「本地 in-flight 计数优先、副本上报值兜底」改为
+> 「取本地计数与副本上报值的较大者」（多 HTTP 代理场景下本地计数会低估副本真实负载）。
+> 因此 PDF 4.4 节「以副本 `record_routing_stats` 上报值兜底」与结论(4)「后续可改进方向是
+> 换成副本上报的真实队列长度」两句描述的是修正前的实现；口径以本 README 与
+> `src/target3/routers.py` 为准。PDF 与主表的所有数字不受影响（归档结果由修正前的实现产生，
+> 详见 `METRICS.md` 的「解释边界」）。另外，PDF 第 4 节末将本轮 `dispatch_lag_p95` 和
+> `client_queue_p95` 的低值表述为压测端没有成为瓶颈；本 README 与 `METRICS.md` 将其限定为
+> 本轮观测到的客户端等待较小，不将单轮观测解释为普遍因果结论。
+
 ## GPU 与软件版本
 
 - GPU：4 × NVIDIA GeForce RTX 4090 D（24 GB），单机，驱动 580.105.08，CUDA 13.0（AutoDL 北京 B2 区）
@@ -13,6 +23,7 @@
   - `ray[serve]==2.56.0`，`protobuf==6.33.5`（7.x 与 Ray 2.56 不兼容，见文末排错记录），`httpx`，`aiohttp`
 - 模型：`Qwen/Qwen3-0.6B`，本地路径 `/root/autodl-tmp/models/Qwen3-0.6B`（hf-mirror 下载）
 - 两个环境互相独立，只通过 HTTP 通信；SGLang 后端监听 31000–31003，Ray Serve 代理监听 8000
+- 归档运行未显式设置 `--mem-fraction-static` 与 `--attention-backend`，使用 SGLang 0.5.14 默认行为；当时有效的具体默认值未单独记录
 
 ## 安装方法
 
@@ -80,6 +91,8 @@ B_MAX_ONGOING=16 ./run_group.sh D  D_improved  ../../results/target3/D_improved
 | C | consistent_hash（num_fallback_replicas=0） | 16 | 按 X-Session-Id 严格亲和，观察缓存收益与热点 |
 | D | affinity_load（自研，`src/target3/routers.py`） | 16 | 前缀亲和优先 + 负载感知降级 |
 
+本四卡实验中的 B1/B2 候选值 16/32 来自四卡环境自身的对照；单卡版的 64 来自其单卡环境对照。两套候选值受各自 KV 池容量和批处理收益点影响，不可互相套用。
+
 ## 脚本用途
 
 | 脚本 | 作用 |
@@ -93,6 +106,26 @@ B_MAX_ONGOING=16 ./run_group.sh D  D_improved  ../../results/target3/D_improved
 | `run_all.sh` | 五轮全跑：先 validate_workload.py 校验负载，再依次 A/B1/B2/C/D；不生成主表或 comparison.json |
 | `make_main_table.py` | 从各轮 summary.json 汇总生成 `results/target3/main_table.csv` |
 | `course_workload/` | 课程负载脚本原样拷贝（run_workload.py / validate_workload.py / requirements.txt / NOTICE.md） |
+
+## 路由单元测试覆盖（11 项）
+
+从仓库根目录运行 `python3 -m unittest discover -s HW3/tests -v`。测试使用 Python 标准库及最小 Ray 类型桩，不需要 GPU、Ray Serve、SGLang 或模型；逐项说明如下。
+
+| 测试 | 覆盖内容 |
+| --- | --- |
+| `test_affinity_is_stable_across_candidate_order_and_ignores_cooler_peers` | 四卡 D 按会话稳定亲和；候选副本顺序变化或其他副本更冷时，未达热点阈值仍选同一首选副本。 |
+| `test_overflow_is_inclusive_at_hot_fraction_and_offers_coolest_peer_first` | 验证达到热阈值（含等于阈值）时触发溢出，并先提供当前最冷副本。 |
+| `test_multi_proxy_load_uses_replica_wide_count_even_when_local_count_is_nonzero` | 验证本地计数非零时仍合并副本上报值，两个 Proxy 对共享负载作出一致的溢出选择。 |
+| `test_local_count_wins_if_replica_report_is_stale_and_hooks_floor_at_zero` | 验证本地较新计数不被陈旧上报值覆盖，生命周期钩子正确增减且不会降到零以下。 |
+| `test_empty_and_single_replica_candidates_are_safe` | 验证无候选副本及仅有一个候选副本时的边界行为。 |
+| `test_a_b_c_d_four_gpu_integration_mapping` | 验证四卡 A/B/C/D 的路由映射，并检查 C/D 的准入默认值为 16。 |
+| `test_overflow_precedes_affinity_rank_at_threshold` | 验证单卡交叉验证版 D 达到阈值时先给溢出副本，再给亲和副本。 |
+| `test_under_threshold_or_unknown_primary_queue_keeps_affinity` | 验证低于阈值或无法探测首选副本队列时保留亲和选择。 |
+| `test_independent_proxy_routers_probe_global_queue_and_choose_same_spill` | 验证单卡版的独立路由器读取相同队列快照时选择一致的溢出副本。 |
+| `test_default_threshold_is_seventy_five_percent_with_minimum_one` | 验证单卡版默认热点阈值为准入上限的 75%，且最小阈值为 1。 |
+| `test_a_b_c_d_one_gpu_mode_mapping` | 验证单卡交叉验证版 A/B/C/D 模式对应的路由器配置。 |
+
+这些测试验证的是自定义路由决策与项目内配置边界；A/B/C 的 Ray 内置算法并未在测试中重实现。真实 Ray Proxy 并发竞态、HTTP/SSE 转发和 GPU 压测仍需另行集成验证，详见 [`HW3/tests/README.md`](../tests/README.md)。
 
 目标一（第二关挑战任务一）：
 

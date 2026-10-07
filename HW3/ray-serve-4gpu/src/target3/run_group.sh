@@ -27,7 +27,18 @@ esac
 
 # 0. Stop a previous deploy_app.py and tear the Ray cluster down, so each round
 #    starts from a freshly built 1 head + 4 worker topology.
-pkill -f "deploy_app.py" 2>/dev/null || true
+DEPLOY_PID_FILE="logs/deploy_app.pid"
+mkdir -p "$(dirname "$DEPLOY_PID_FILE")"
+if [[ -f "$DEPLOY_PID_FILE" ]]; then
+  PREVIOUS_DEPLOY_PID=$(<"$DEPLOY_PID_FILE")
+  if [[ "$PREVIOUS_DEPLOY_PID" =~ ^[0-9]+$ ]] && kill -0 "$PREVIOUS_DEPLOY_PID" 2>/dev/null; then
+    PREVIOUS_DEPLOY_COMMAND=$(ps -p "$PREVIOUS_DEPLOY_PID" -o args= 2>/dev/null || true)
+    if [[ "$PREVIOUS_DEPLOY_COMMAND" == *"deploy_app.py"* ]]; then
+      kill "$PREVIOUS_DEPLOY_PID" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$DEPLOY_PID_FILE"
+fi
 "$RAY_BIN/ray" stop --force >/dev/null 2>&1 || true
 sleep 5
 
@@ -35,6 +46,7 @@ sleep 5
 GROUP=$GROUP ROUTER_NAME=$ROUTER MAX_ONGOING=$MQR "$RAY_PY" deploy_app.py --group "$GROUP" \
   --router-name "$ROUTER" --max-ongoing-requests "$MQR" &
 DEPLOY_PID=$!
+printf '%s\n' "$DEPLOY_PID" > "$DEPLOY_PID_FILE"
 # Wait until the root route is registered and responds; GET / is expected to
 # return a client error because this app forwards POST /generate requests only.
 READY=0
@@ -42,7 +54,9 @@ SERVE_READY_TIMEOUT_SECONDS="${SERVE_READY_TIMEOUT_SECONDS:-240}"
 READY_DEADLINE=$((SECONDS + SERVE_READY_TIMEOUT_SECONDS))
 while (( SECONDS < READY_DEADLINE )); do
   if ! kill -0 $DEPLOY_PID 2>/dev/null; then
-    echo "deploy_app.py exited early; see its output"; exit 1
+    echo "deploy_app.py exited early; see its output"
+    rm -f "$DEPLOY_PID_FILE"
+    exit 1
   fi
   HTTP_CODE=$(curl --silent --output /dev/null --write-out '%{http_code}' \
     --max-time 3 "$BASE_URL/" 2>/dev/null || true)
@@ -55,6 +69,7 @@ done
 if [[ "$READY" -ne 1 ]]; then
   echo "ERROR: Ray Serve did not register its root route within ${SERVE_READY_TIMEOUT_SECONDS} seconds; aborting before cache flush/workload." >&2
   kill "$DEPLOY_PID" 2>/dev/null || true
+  rm -f "$DEPLOY_PID_FILE"
   exit 1
 fi
 echo "Serve app deployed (pid $DEPLOY_PID)"

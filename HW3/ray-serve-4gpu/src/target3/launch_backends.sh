@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Start four SGLang backends, one per GPU, ports 31000-31003.
 # Radix cache stays ON (default). Logs go to logs/backend-<i>.log.
-set -u
+# 如需在 4 卡上复跑并记录显存比例，请在此显式传参。
+set -euo pipefail
 MODEL="${MODEL:-/root/autodl-tmp/models/Qwen3-0.6B}"
 LOGDIR="${LOGDIR:-logs}"
 SGL_PY="${SGL_PY:-/root/autodl-tmp/envs/sgl/bin/python}"
@@ -10,9 +11,9 @@ STARTED_PIDS=()
 fail_startup() {
   local backend="$1"
   echo "ERROR: backend $backend did not become ready; check $LOGDIR/backend-${backend}.log" >&2
-  for pid in "${STARTED_PIDS[@]}"; do
-    kill "$pid" 2>/dev/null || true
-  done
+  if (( ${#STARTED_PIDS[@]} > 0 )); then
+    for pid in "${STARTED_PIDS[@]}"; do kill "$pid" 2>/dev/null || true; done
+  fi
   exit 1
 }
 
