@@ -45,28 +45,30 @@ python -m pip install -r "$COURSE_DIR/requirements.txt"
 ## 启动与回放命令
 
 所有脚本在 `src/target3/` 下运行。`RAY_PY`、`SGL_PY`、`MODEL` 三个环境变量按上面的路径设置
-（脚本内已有同款默认值，路径一致时无需显式 export）。
+（脚本内已有同款默认值，路径一致时无需显式 export）。以下命令按此工作目录执行；结果路径相对当前目录，使用 `../../results/target3` 才会写入本目录下的 `results/target3/`。
 
 ```bash
 export COURSE_DIR=/root/autodl-tmp/hw3/26fall-HW-data/workloads/hw2/target3-routing-policies
 cd src/target3
 
 ./launch_backends.sh        # 启动 4 个 SGLang 后端（GPU 0-3，端口 31000-31003），等 /v1/models 就绪
-./run_all.sh                # 一口气跑 A、B1、B2、C、D 五轮
+B_MAX_ONGOING=16 RESULTS_ROOT=../../results/target3 ./run_all.sh  # 按报告配置跑 A、B1、B2、C、D 五轮
 ./stop_backends.sh          # 收尾
 ```
+
+`run_all.sh` 和独立调用 `run_group.sh` 时，C、D 的 `max_ongoing_requests` 默认均为 16；上面的命令仍显式设为 16，便于与报告和归档结果保持一致。该脚本只校验负载并运行五轮实验，不会生成主表或 `comparison.json`；生成汇总的命令见下文。
 
 或分轮执行（每轮自动完成：停掉旧 Ray 集群 -> 重建 1 head + 4 worker -> 部署 Replica -> flush 四个后端缓存 -> 回放固定负载）：
 
 ```bash
-./run_group.sh A  A_default      results/target3/A_default
-./run_group.sh B1 B1_candidate_1 results/target3/B_candidates/candidate-1
-./run_group.sh B2 B2_candidate_2 results/target3/B_candidates/candidate-2
-B_MAX_ONGOING=16 ./run_group.sh C  C_affinity  results/target3/C_affinity
-B_MAX_ONGOING=16 ./run_group.sh D  D_improved  results/target3/D_improved
+./run_group.sh A  A_default      ../../results/target3/A_default
+./run_group.sh B1 B1_candidate_1 ../../results/target3/B_candidates/candidate-1
+./run_group.sh B2 B2_candidate_2 ../../results/target3/B_candidates/candidate-2
+B_MAX_ONGOING=16 ./run_group.sh C  C_affinity  ../../results/target3/C_affinity
+B_MAX_ONGOING=16 ./run_group.sh D  D_improved  ../../results/target3/D_improved
 ```
 
-> B 的选定值为 **16**（依据见 report.pdf §3.1），因此跑 C、D 前设置 `B_MAX_ONGOING=16`。
+> B 的选定值为 **16**（依据见 report.pdf §3.1）；`run_group.sh` 在未设置 `B_MAX_ONGOING` 时对 C、D 也默认使用 16。如需使用其他值，可通过该环境变量覆盖。输出目录应相对 `src/target3/` 指向 `../../results/target3/`，避免写到 `src/target3/results/`。
 
 五轮的配置（`deploy_app.py` 与 `run_workload.py` 记录一致）：
 
@@ -88,7 +90,7 @@ B_MAX_ONGOING=16 ./run_group.sh D  D_improved  results/target3/D_improved
 | `sglang_replica.py` | Replica：流式转发 /generate 到固定 SGLang 后端，回写路由响应头；异步上报在飞数 |
 | `routers.py` | 组 D 路由器 AffinityLoadAwareRouter：blake2b 稳定哈希选首选副本，在飞数 ≥ 0.5×上限时把「最空闲副本 + 首选副本」放进同一优先级让 Serve 择优 |
 | `run_group.sh` | 单轮编排：ray stop -> deploy_app.py -> flush_backends.py -> run_workload.py |
-| `run_all.sh` | 五轮全跑：先 validate_workload.py 校验负载，再依次 A/B1/B2/C/D |
+| `run_all.sh` | 五轮全跑：先 validate_workload.py 校验负载，再依次 A/B1/B2/C/D；不生成主表或 comparison.json |
 | `make_main_table.py` | 从各轮 summary.json 汇总生成 `results/target3/main_table.csv` |
 | `course_workload/` | 课程负载脚本原样拷贝（run_workload.py / validate_workload.py / requirements.txt / NOTICE.md） |
 
@@ -112,7 +114,7 @@ B_MAX_ONGOING=16 ./run_group.sh D  D_improved  results/target3/D_improved
 | C | `consistent_hash` | 16 | 2048/2048（100.0%） | 30.98 | 95.78% | 136,444 | 40.38 | 41.04 | 0=1280 / 1=267 / 2=303 / 3=198 |
 | D | `affinity_load` | 16 | 2048/2048（100.0%） | 62.99 | 88.59% | 369,024 | 5.93 | 6.63 | 0=492 / 1=539 / 2=490 / 3=527 |
 
-> 表内数字由 `src/target3/make_main_table.py` 从各组 `summary.json` 生成，与 `results/target3/main_table.csv` 逐列一致；`dispatch_lag_p95` / `client_queue_p95` 均在毫秒级，说明压测端不是瓶颈。
+> 表内数字由 `src/target3/make_main_table.py` 从各组 `summary.json` 生成，与 `results/target3/main_table.csv` 逐列一致；`dispatch_lag_p95` / `client_queue_p95` 本轮均在毫秒级，表示观测到的客户端调度等待较小；这不是压测端在所有条件下均无瓶颈的普遍证明，口径与限制见 [METRICS.md](METRICS.md)。
 
 ```text
 results/
@@ -134,16 +136,28 @@ results/
 - 主表各列（成功率、吞吐、缓存命中率、实际 prefill tokens、TTFT p50/p95、端到端 p95、后端分布）直接读自各轮
   `summary.json` 的 `schema_version=2` 字段；逐请求明细在 `requests.csv`，分阶段（steady/burst/recovery）
   指标在 `summary.json` 的分阶段字段。
-- 主表生成：`make_main_table.py results/target3`；相对变化（课程脚本）：
+- 从 `src/target3/` 运行以下命令生成主表；`make_main_table.py` 要求为每组提供 `--run NAME=summary.json`，并用 `--output` 指定 CSV 路径：
+
+```bash
+python make_main_table.py \
+  --run A=../../results/target3/A_default/summary.json \
+  --run B1=../../results/target3/B_candidates/candidate-1/summary.json \
+  --run B2=../../results/target3/B_candidates/candidate-2/summary.json \
+  --run C=../../results/target3/C_affinity/summary.json \
+  --run D=../../results/target3/D_improved/summary.json \
+  --output ../../results/target3/main_table.csv
+```
+
+相对变化由课程脚本生成，路径同样相对 `src/target3/`：
 
 ```bash
 python "$COURSE_DIR/compare_runs.py" --baseline A \
-  --run A=results/target3/A_default/summary.json \
-  --run B1=results/target3/B_candidates/candidate-1/summary.json \
-  --run B2=results/target3/B_candidates/candidate-2/summary.json \
-  --run C=results/target3/C_affinity/summary.json \
-  --run D=results/target3/D_improved/summary.json \
-  --output results/target3/comparison.json
+  --run A=../../results/target3/A_default/summary.json \
+  --run B1=../../results/target3/B_candidates/candidate-1/summary.json \
+  --run B2=../../results/target3/B_candidates/candidate-2/summary.json \
+  --run C=../../results/target3/C_affinity/summary.json \
+  --run D=../../results/target3/D_improved/summary.json \
+  --output ../../results/target3/comparison.json
 ```
 
 ## 排错记录（组 D 从 5 req/s 到 63 req/s）

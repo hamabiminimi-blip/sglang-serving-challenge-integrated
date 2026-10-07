@@ -2,8 +2,8 @@
 
 Signals (current request + current service state only):
   - session id of the pending request (== the workload's prefix family id)
-  - current in-flight count per replica (router lifecycle hooks, with the
-    replicas' record_routing_stats reports as a cross-instance fallback)
+  - current in-flight count per replica (the maximum of router lifecycle-hook
+    counts and the replica's record_routing_stats report, which spans proxies)
   - each replica's configured max_ongoing_requests
 
 Rule:
@@ -41,11 +41,14 @@ class AffinityLoadAwareRouter(FIFOMixin, RequestRouter):
         return self._counts.get(replica_id, 0)
 
     def _load(self, replica: RunningReplica) -> int:
-        count = self._record_in_flight(replica.replica_id)
-        if count == 0:
-            stats = replica.routing_stats or {}
-            count = int(stats.get("in_flight") or 0)
-        return count
+        # Router instances are local to HTTP proxies, while a replica may be
+        # receiving requests from several proxies. Keep the local estimate
+        # (which may be fresher than the polled report), but never let it hide
+        # the replica-wide in-flight count reported by the replica.
+        local_count = self._record_in_flight(replica.replica_id)
+        stats = replica.routing_stats or {}
+        reported_count = int(stats.get("in_flight") or 0)
+        return max(local_count, reported_count)
 
     async def choose_replicas(
         self,

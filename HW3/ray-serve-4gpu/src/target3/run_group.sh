@@ -20,8 +20,8 @@ case "$GROUP" in
   A)  ROUTER=p2c;              MQR=5;;
   B1) ROUTER=p2c;              MQR=16;;
   B2) ROUTER=p2c;              MQR=32;;
-  C)  ROUTER=consistent_hash;  MQR="${B_MAX_ONGOING:-32}";;
-  D)  ROUTER=affinity_load;    MQR="${B_MAX_ONGOING:-32}";;
+  C)  ROUTER=consistent_hash;  MQR="${B_MAX_ONGOING:-16}";;
+  D)  ROUTER=affinity_load;    MQR="${B_MAX_ONGOING:-16}";;
   *)  echo "unknown group $GROUP"; exit 1;;
 esac
 
@@ -35,14 +35,28 @@ sleep 5
 GROUP=$GROUP ROUTER_NAME=$ROUTER MAX_ONGOING=$MQR "$RAY_PY" deploy_app.py --group "$GROUP" \
   --router-name "$ROUTER" --max-ongoing-requests "$MQR" &
 DEPLOY_PID=$!
-# wait for the READY line
-for _ in $(seq 1 120); do
+# Wait until the root route is registered and responds; GET / is expected to
+# return a client error because this app forwards POST /generate requests only.
+READY=0
+SERVE_READY_TIMEOUT_SECONDS="${SERVE_READY_TIMEOUT_SECONDS:-240}"
+READY_DEADLINE=$((SECONDS + SERVE_READY_TIMEOUT_SECONDS))
+while (( SECONDS < READY_DEADLINE )); do
   if ! kill -0 $DEPLOY_PID 2>/dev/null; then
     echo "deploy_app.py exited early; see its output"; exit 1
   fi
-  if curl -s "$BASE_URL/generate" -o /dev/null 2>/dev/null; then break; fi
+  HTTP_CODE=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    --max-time 3 "$BASE_URL/" 2>/dev/null || true)
+  if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ || ( "$HTTP_CODE" =~ ^4[0-9][0-9]$ && "$HTTP_CODE" != "404" ) ]]; then
+    READY=1
+    break
+  fi
   sleep 2
 done
+if [[ "$READY" -ne 1 ]]; then
+  echo "ERROR: Ray Serve did not register its root route within ${SERVE_READY_TIMEOUT_SECONDS} seconds; aborting before cache flush/workload." >&2
+  kill "$DEPLOY_PID" 2>/dev/null || true
+  exit 1
+fi
 echo "Serve app deployed (pid $DEPLOY_PID)"
 
 # 2. Flush all four SGLang caches.
